@@ -1,0 +1,59 @@
+services:
+  localstack:
+    image: localstack/localstack:3.5
+    container_name: aws-serverless-demo-localstack
+    ports:
+      - "4566:4566"
+    environment:
+      SERVICES: sqs,dynamodb
+      AWS_DEFAULT_REGION: us-east-1
+      DEBUG: "1"
+      SQS_QUEUE_NAME: events-queue
+      DYNAMODB_TABLE_NAME: events-table
+    volumes:
+      - "./scripts/bootstrap_localstack.sh:/etc/localstack/init/ready.d/bootstrap_localstack.sh"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "awslocal sqs list-queues > /dev/null 2>&1 && awslocal dynamodb list-tables > /dev/null 2>&1",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  api:
+    build: .
+    container_name: aws-serverless-demo-api
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    ports:
+      - "${API_PORT:-8000}:8000"
+    environment:
+      AWS_ENDPOINT_URL: http://localstack:4566
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      DYNAMODB_TABLE_NAME: events-table
+      SQS_QUEUE_NAME: events-queue
+    volumes:
+      - ".:/code"
+    depends_on:
+      localstack:
+        condition: service_healthy
+
+  worker:
+    build: .
+    container_name: aws-serverless-demo-worker
+    command: python -m worker.main
+    environment:
+      AWS_ENDPOINT_URL: http://localstack:4566
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      DYNAMODB_TABLE_NAME: events-table
+      SQS_QUEUE_NAME: events-queue
+    volumes:
+      - ".:/code"
+    depends_on:
+      localstack:
+        condition: service_healthy
